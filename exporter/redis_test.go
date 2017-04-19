@@ -240,6 +240,69 @@ func TestExporterValues(t *testing.T) {
 	}
 }
 
+func TestEvictionCounts(t *testing.T) {
+
+	e, _ := NewRedisExporter(defaultRedisHost, "test", "")
+
+	c, err := redis.DialURL(defaultRedisHost.Addrs[0])
+	if err != nil {
+		t.Errorf("couldn't setup redis, err: %s ", err)
+		return
+	}
+	defer c.Close()
+
+	_, err = c.Do("SELECT", dbNumStr)
+	if err != nil {
+		t.Errorf("couldn't setup redis, err: %s ", err)
+		return
+	}
+
+	initialEvictedKeysTotal := 0.0
+
+	scrapes := make(chan scrapeResult, 10000)
+	e.scrape(scrapes)
+
+	for s := range scrapes {
+		if "evicted_keys_total" == s.Name {
+			initialEvictedKeysTotal = s.Value
+		}
+	}
+	log.Printf("initialEvictedKeysTotal: %f", initialEvictedKeysTotal)
+
+	temp, err := redis.Values(c.Do("CONFIG", "GET", "maxmemory-policy"))
+	if err != nil || len(temp) != 2 {
+		t.Errorf("err: %s", err)
+	}
+
+	policy, _ := redis.String(temp[1], nil)
+	log.Println(c.Do("CONFIG", "SET", "maxmemory-policy", "allkeys-random"))
+	defer log.Println(c.Do("CONFIG", "SET", "maxmemory-policy", policy))
+
+	log.Println(c.Do("CONFIG", "SET", "MAXMEMORY", "2M"))
+	defer c.Do("CONFIG", "SET", "MAXMEMORY", "0")
+
+	large := strings.Repeat("123", 100)
+	log.Println("lets go")
+	for numKeys := 5000; numKeys > 0; numKeys-- {
+		key := fmt.Sprintf("tst-key-evict-me-", numKeys)
+		c.Do("SET", key, large)
+		defer c.Do("DEL", key, fmt.Sprintf("val-%d"), numKeys)
+
+		numKeys--
+		if numKeys == 0 {
+			break
+		}
+	}
+	scrapes2 := make(chan scrapeResult, 10000)
+	e.scrape(scrapes2)
+
+	for s := range scrapes2 {
+		if "evicted_keys_total" == s.Name && (initialEvictedKeysTotal >= s.Value) {
+			t.Errorf("expected higher evicted_keys_total, still is %d", s.Value)
+		}
+	}
+}
+
 type tstData struct {
 	db                        string
 	stats                     string
