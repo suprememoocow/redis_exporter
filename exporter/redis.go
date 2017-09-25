@@ -97,6 +97,7 @@ var (
 		"repl_backlog_size":          "replication_backlog_bytes",
 		"master_last_io_seconds_ago": "master_last_io_seconds",
 		"master_repl_offset":         "master_repl_offset",
+		"master_sync_in_progress":    "master_sync_in_progress",
 
 		// # CPU
 		"used_cpu_sys":           "used_cpu_sys",
